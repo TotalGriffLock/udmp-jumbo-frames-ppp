@@ -30,17 +30,18 @@ while true; do
           echo $pinterface is one we should be checking
           # Check to see if we need to update the config file
           echo Checking MTU for $pinterface
-          pmtu=$(grep $(($PTARGET-8)) /etc/ppp/peers/$pinterface)
+          pmtu=$(grep 'mtu $(($PTARGET))' /etc/ppp/peers/$pinterface)
           if [[ $pmtu ]]; then
+            echo MTU already correct in /etc/ppp/peers/$pinterface
+            pmtucorrect=1
+          else
             echo Current config file MTU for $pinterface is $pmtu
             echo Updating config file for $pinterface
             echo Making changes to /etc/ppp/peers/$pinterface
             # Update MTU in ppp interface config file
-            sed -i 's/ '$(($PTARGET-8))'/ '$PTARGET'/g' /etc/ppp/peers/$pinterface
-            killall -SIGHUP pppd
-          else
-            echo MTU already correct in /etc/ppp/peers/$pinterface
-            pmtucorrect=1
+            sed -i 's/mtu\s[0-9]*/mtu '$PTARGET'/g' /etc/ppp/peers/$pinterface
+            sed -i 's/mru\s[0-9]*/mru '$PTARGET'/g' /etc/ppp/peers/$pinterface
+            restartpppd=1
           fi
           # Determine eth interface associated with ppp interface
           einterface=$(sed -n 's/plugin rp-pppoe.so \(.*\)/\1/p' /etc/ppp/peers/$pinterface)
@@ -50,7 +51,10 @@ while true; do
           echo Got $emtu for $einterface
           # Current ethernet MTU is incorrect so needs changing
           echo Checking $einterface
-          if [[ $emtu -lt $(($PTARGET+8)) ]] ; then
+          if [[ $emtu -eq $(($PTARGET)) ]] ; then
+            echo $einterface has right MTU
+            emtucorrect=1
+          else
             echo $einterface has wrong MTU
             # Use +12 in above command if PPPoE over VLAN
             echo Reconfiguring ethernet MTU to $(($PTARGET+8)) for $einterface
@@ -62,10 +66,7 @@ while true; do
             # ip link set dev $einterface mtu $(($PTARGET+12)) && ip link set dev $einterface.6 mtu $(($PTARGET+8))
             # Bring interface down and up to apply changes
             echo Running ip link set $einterface down \&\& ip link set $einterface up
-            ip link set $einterface down && ip link set $einterface up
-          else
-            echo $einterface has right MTU
-            emtucorrect=1
+            ip link set $einterface down && ip link set $einterface up  
           fi
           # A situation can occur where all the configuration files are correct
           # but the ppp interface is still not right
@@ -74,14 +75,14 @@ while true; do
           if [ $pmtucorrect -eq 1 ] && [ $emtucorrect -eq 1 ]; then
             # Config files are all correct
             echo Config files are now all set correctly
-            runningmtu=$(ip link list | grep $pinterface | grep $(($PTARGET-8)))
-            if [ ! -z $runningmtu ]; then
+            runningmtu=$(ip link list | grep $pinterface | grep $(($PTARGET)))
+            if [ -z $runningmtu ]; then
               echo $pinterface still has wrong MTU
               restartpppd=1
             fi
           fi
         fi
-      done
+      done     
       if [[ $restartpppd == 1 ]]; then
         echo Killing pppd
         killall -SIGHUP pppd
