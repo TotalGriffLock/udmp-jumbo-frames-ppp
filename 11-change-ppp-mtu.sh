@@ -5,6 +5,7 @@
 MINTERFACES="(ppp0)"
 # Desired MTU of PPP interfaces
 PTARGET=1500
+SET_MSS=false
 
 function check_mtu {
     ip link list | grep -E $MINTERFACES | grep 'mtu '$PTARGET > /dev/null
@@ -54,6 +55,20 @@ while true; do
           ip link set $pinterface mtu $PTARGET
         fi
       done
+      
+      if [[ $SET_MSS ]]; then
+        echo "Checking if iptables MSS Value needs to be updated"
+        currentMSS=$(iptables -L -t mangle --line-numbers | grep -m 1 'SYN,RST/SYN TCPMSS' | sed 's/.*set \([0-9]\{4\}\).*/\1/')
+        targetMSS=$(($PTARGET-40))
+        if [[ $currentMSS -ne $targetMSS ]]; then
+            echo "Updating MSS from $currentMSS to $targetMSS"
+            while [[ $(iptables -L -t mangle --line-numbers | grep 'SYN,RST/SYN TCPMSS') ]]; do
+                iptables -t mangle -D UBIOS_FORWARD_TCPMSS 1
+            done
+            iptables -t mangle -A UBIOS_FORWARD_TCPMSS -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $targetMSS
+        fi
+      fi
+      
       # Kill pppd to apply changes (it gets restarted automatically)
       # This does take down existing ppp links but as pppd comes straight back up, so should the links
       # Only kill pppd if there are ppp interfaces active and changes were made
